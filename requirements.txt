@@ -4,3 +4,5 @@ numpy
 fastapi
 uvicorn
 gradio
+python-multipart
+pillow
