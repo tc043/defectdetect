@@ -23,40 +23,40 @@ def preprocess(img):
 
 def postprocess(preds, img, conf_thres=0.3):
     """
-    Handles both YOLO ONNX formats:
+    Handles:
     1. Post-NMS: (N, 6) => x1, y1, x2, y2, conf, class_id
-    2. Raw: (N, 4 + 1 + num_classes) => boxes, obj_conf, class_scores...
+    2. Raw YOLO: (1, 4 + 1 + num_classes, num_preds)
     """
     output = preds[0]
     annotated = img.copy()
 
-    # Case 1: Post-NMS (N, 6)
-    if output.shape[1] == 6:
+    # Case 1: Post-NMS format
+    if output.ndim == 2 and output.shape[1] == 6:
         for x1, y1, x2, y2, score, cls_id in output:
             if score > conf_thres:
                 x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(annotated, f"cls:{int(cls_id)} {score:.2f}",
-                            (x1, y1 - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                            (0, 255, 0), 1)
+                            (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5, (0, 255, 0), 1)
 
-    # Case 2: Raw (N, 4 + 1 + num_classes)
-    else:
-        for det in output:
-            x1, y1, x2, y2 = det[:4]
-            object_conf = det[4]
-            class_scores = det[5:]
-            cls_id = int(np.argmax(class_scores))
-            cls_conf = class_scores[cls_id]
-            score = object_conf * cls_conf
+    # Case 2: Raw YOLO ONNX format [1, 4+1+num_classes, num_preds]
+    elif output.ndim == 3:
+        output = np.squeeze(output).T  # shape: (num_preds, 4+1+num_classes)
+        boxes = output[:, :4]
+        obj_conf = output[:, 4]
+        class_scores = output[:, 5:]
+        scores = obj_conf[:, None] * class_scores
+        class_ids = np.argmax(scores, axis=1)
+        confidences = np.max(scores, axis=1)
+
+        for (x, y, w, h), score, cls_id in zip(boxes, confidences, class_ids):
             if score > conf_thres:
-                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                x1, y1, x2, y2 = map(int, [x - w/2, y - h/2, x + w/2, y + h/2])
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(annotated, f"cls:{cls_id} {score:.2f}",
-                            (x1, y1 - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5,
-                            (0, 255, 0), 1)
+                            (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5, (0, 255, 0), 1)
 
     return annotated
     
