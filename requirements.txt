@@ -1,3 +1,6 @@
-ultralytics
+onnxruntime
+opencv-python
+numpy
+fastapi
+uvicorn
 gradio
-pillow
