@@ -77,7 +77,7 @@ def draw_boxes(img_bgr, boxes_xyxy, class_ids, scores):
     return img_bgr
 
 # ---------- Postprocess (universal) ----------
-def postprocess(preds, orig_img_bgr, conf_thres=0.25, iou_thres=0.45):
+def postprocess(preds, orig_img_bgr, conf_thres=0.10, iou_thres=0.45):
     """
     Supports:
      - Post-NMS: shape (N,6) -> x1,y1,x2,y2,conf,cls_id (either normalized or pixels)
@@ -103,25 +103,16 @@ def postprocess(preds, orig_img_bgr, conf_thres=0.25, iou_thres=0.45):
             boxes[:, 1] *= orig_h
             boxes[:, 3] *= orig_h
 
-        # If boxes are xyxy, keep; if they are xywh, detect by seeing if x2 < x1 for many, but assume xyxy here.
         boxes_xyxy = boxes  # assume already xyxy
 
     # Case B: Raw YOLO output [1, 4+1+num_classes, num_preds]
     else:
-        # preds[0] shape e.g. (11, 8400) after squeeze
-        arr = np.squeeze(preds[0])  # if preds[0] is shape (1,11,8400) -> squeeze -> (11,8400)
-        if arr.ndim == 2 and arr.shape[0] > arr.shape[1]:
-            # ensure shape (C, num_preds) -> transpose to (num_preds, C)
-            arr = arr
-        if arr.ndim == 2 and arr.shape[0] <= arr.shape[1]:
-            arr = arr  # (C, num_preds)
-        # Transpose to (num_preds, C)
+        arr = np.squeeze(preds[0])
         arr = arr.T  # (num_preds, 4+1+num_classes)
 
         if arr.size == 0:
             return orig_img_bgr, []
 
-        # boxes are x_center, y_center, w, h (likely normalized [0..1])
         boxes_xywh = arr[:, :4]  # (N,4)
         obj_conf = arr[:, 4]     # (N,)
         class_scores = arr[:, 5:] # (N, num_classes)
@@ -140,8 +131,6 @@ def postprocess(preds, orig_img_bgr, conf_thres=0.25, iou_thres=0.45):
         class_ids = class_ids[mask]
 
         # convert to xyxy in original image coords
-        # these coords are commonly normalized [0..1] relative to model input -> scale to original image
-        # multiply by original width/height
         boxes_xywh[:, 0] *= orig_w   # x center
         boxes_xywh[:, 1] *= orig_h   # y center
         boxes_xywh[:, 2] *= orig_w   # width
@@ -184,7 +173,7 @@ def postprocess(preds, orig_img_bgr, conf_thres=0.25, iou_thres=0.45):
 app = FastAPI()
 
 @app.post("/predict")
-async def predict_api(file: UploadFile = File(...), conf_thres: float = 0.25):
+async def predict_api(file: UploadFile = File(...), conf_thres: float = 0.10):
     image_bytes = await file.read()
     nparr = np.frombuffer(image_bytes, np.uint8)
     img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -195,11 +184,11 @@ async def predict_api(file: UploadFile = File(...), conf_thres: float = 0.25):
     preds = session.run(None, {input_name: inp})
     annotated, detections = postprocess(preds, img_bgr, conf_thres=conf_thres)
 
-    # encode annotated image to JPEG for convenience (base64 / bytes can be returned)
+    # encode annotated image to JPEG for convenience (raw bytes)
     _, img_encoded = cv2.imencode('.jpg', annotated)
     return JSONResponse(content={
         "detections": detections,
-        "annotated_image_bytes": img_encoded.tobytes()  # caller can save as .jpg
+        "annotated_image_bytes": img_encoded.tobytes()
     })
 
 # ---------- GUI ----------
@@ -208,7 +197,7 @@ def predict_gui(image):
     img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
     inp = preprocess(img_bgr)
     preds = session.run(None, {input_name: inp})
-    annotated, _ = postprocess(preds, img_bgr, conf_thres=0.25)
+    annotated, _ = postprocess(preds, img_bgr, conf_thres=0.10)
     return cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
 
 demo = gr.Interface(
