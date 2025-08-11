@@ -21,20 +21,29 @@ def preprocess(img):
     img_tensor = np.expand_dims(img_transposed.astype(np.float32), axis=0)
     return img_tensor
 
-def postprocess(preds, img):
-    # NOTE: This is simplified; replace with YOLO's official postprocessing (NMS)
-    boxes = preds[0][:, :4]
-    scores = preds[0][:, 4]
-    classes = preds[0][:, 5]
+def postprocess(preds, img, conf_thres=0.3):
+    # preds[0] shape: (num_detections, attributes)
+    output = preds[0]
     annotated = img.copy()
-    for box, score, cls in zip(boxes, scores, classes):
-        if score > 0.3:
-            x1, y1, x2, y2 = map(int, box)
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(annotated, f"cls:{int(cls)} {score:.2f}", (x1, y1 - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-    return annotated
 
+    for det in output:
+        x1, y1, x2, y2 = det[:4]
+        object_conf = det[4]
+        class_scores = det[5:]
+
+        cls_id = int(np.argmax(class_scores))
+        cls_conf = class_scores[cls_id]
+
+        # Final confidence = objectness * class confidence
+        score = object_conf * cls_conf
+
+        if score > conf_thres:
+            cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(annotated, f"cls:{cls_id} {score:.2f}", (int(x1), int(y1) - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+    return annotated
+    
 # API
 app = FastAPI()
 
