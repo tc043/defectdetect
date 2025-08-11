@@ -22,25 +22,41 @@ def preprocess(img):
     return img_tensor
 
 def postprocess(preds, img, conf_thres=0.3):
-    # preds[0] shape: (num_detections, attributes)
+    """
+    Handles both YOLO ONNX formats:
+    1. Post-NMS: (N, 6) => x1, y1, x2, y2, conf, class_id
+    2. Raw: (N, 4 + 1 + num_classes) => boxes, obj_conf, class_scores...
+    """
     output = preds[0]
     annotated = img.copy()
 
-    for det in output:
-        x1, y1, x2, y2 = det[:4]
-        object_conf = det[4]
-        class_scores = det[5:]
+    # Case 1: Post-NMS (N, 6)
+    if output.shape[1] == 6:
+        for x1, y1, x2, y2, score, cls_id in output:
+            if score > conf_thres:
+                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(annotated, f"cls:{int(cls_id)} {score:.2f}",
+                            (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            (0, 255, 0), 1)
 
-        cls_id = int(np.argmax(class_scores))
-        cls_conf = class_scores[cls_id]
-
-        # Final confidence = objectness * class confidence
-        score = object_conf * cls_conf
-
-        if score > conf_thres:
-            cv2.rectangle(annotated, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-            cv2.putText(annotated, f"cls:{cls_id} {score:.2f}", (int(x1), int(y1) - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+    # Case 2: Raw (N, 4 + 1 + num_classes)
+    else:
+        for det in output:
+            x1, y1, x2, y2 = det[:4]
+            object_conf = det[4]
+            class_scores = det[5:]
+            cls_id = int(np.argmax(class_scores))
+            cls_conf = class_scores[cls_id]
+            score = object_conf * cls_conf
+            if score > conf_thres:
+                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(annotated, f"cls:{cls_id} {score:.2f}",
+                            (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            (0, 255, 0), 1)
 
     return annotated
     
